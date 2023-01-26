@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include "error/error.h"
 #include "main.h"
@@ -15,18 +16,14 @@
 #define WORKING_FILE_NAME "preprocessed.asm"
 
 operand_group operand_group_list[] = {
-    [MOV] = {3, 2,
-             {{"A", 0x0 << 2, 0x0},
-              {"B", 0x1 << 2, 0x1},
-              {"PC", 0x3 << 2, 0x3}},
-             false,
-             false},
+    [MOV] = {3, 2, {{"A", 0x0 << 2, 0x0}, {"B", 0x1 << 2, 0x1}, {"PC", 0x3 << 2, 0x3}}, false, false},
     [ALU] = {2, 2, {{"A", 0x0 << 3, 0x1}, {"B", 0x1 << 3, 0x0}}, false, false},
     [LD] = {2, 2, {{"A", 0x0, 0xff}, {"B", 0x1, 0xff}}, true, false},
     [ST] = {2, 1, {{"A", 0x0, 0xff}, {"B", 0x1, 0xff}}, false, false},
     [JMP] = {0, 1,{}, true, true},
     [CMP] = {2, 1, {{"A", 0x0, 0x0}, {"B", 0x1 << 1, 0x1}}, false, false},
-    [BYTE] = {0, 1, {}, true, false}};
+    [BYTE] = {0, 1, {}, true, false}
+};
 
 instruction instruction_set[] = {
     {"NOP", 0b0000 << 4, -1},        {"MOV", 0b0001 << 4, MOV},
@@ -37,7 +34,7 @@ instruction instruction_set[] = {
     {"LD", 0b0010 << 4, LD},         {"ST", 0b0011 << 4, ST},
     {"JMP", 0b0100 << 4 | 0x0, JMP}, {"JE", 0b0100 << 4 | 0x1, JMP},
     {"JA", 0b0100 << 4 | 0x2, JMP},   {"JB", 0b0100 << 4 | 0x3, JMP},
-    {"CMP", 0b0101 << 4, CMP},       {"BYTE", 0b0101 << 4, BYTE},
+    {"CMP", 0b0101 << 4, CMP},       {"BYTE", 0b0000 << 4, BYTE},
 };
 
 label labels[MAX_LABELS] = {};
@@ -63,6 +60,10 @@ void validate_arguments_count(char *line, int line_count);
 int find_instruction_index(char *mnemonic);
 void move_predefined_labels();
 int parse_number(const char *str);
+int find_label_index(char *label);
+int find_operand_index(uint8_t operand_group, char* operand, int count);
+void label_write(uint8_t value);
+void decimal_to_binary_uint8(uint8_t n);
 
 int main(int argc, char *argv[]) {
   print_help(argc, argv[0]);
@@ -78,18 +79,102 @@ int main(int argc, char *argv[]) {
 }
 
 void parse_line(char *line, int line_count) {
-  //char *token = strtok(line, " ");
-  //while (token != NULL) {
-  //  printf("%s\n", token);
-  //  token = strtok(NULL, " ");
-  //}
   validate_arguments_count(line, line_count);
+  char buffer[255];
+  strcpy(buffer, line);
+  char *token = strtok(buffer, " ");
+  int count = 0;
+  uint8_t byte = 0;
+  uint8_t byte2 = 0;
+  bool is_byte = false;
+  bool is_byte2 = false;
+  instruction tmp = {};
+  bool is_label = false;
+  while (token != NULL) {
+    switch (count) {
+    case 0:
+      if (token[0] == '.') { // labels
+        token += 1;          // start pointing from the first character
+        label_index = find_label_index(token);
+        is_label = true; 
+      } else { // mnemotics
+        // add error handling if is not a mnemonic
+        is_byte = true;
+        int tmp_index = find_instruction_index(token);
+        if (tmp_index == -1){
+          print_error_and_exit(UNKNOWN_MNEMONIC, line_count);
+        }
+        tmp = instruction_set[tmp_index];
+        byte = tmp.opcode;
+      }
+      break;
+    case 1:
+      if (is_label) {
+        int value = parse_number(token);
+        if (value == -1) {
+          print_error_and_exit(INVALID_OPERAND, line_count);
+        } else if (value > 255) {
+          print_error_and_exit(LABEL_ADDRESS_OUT_OF_RANGE, line_count);
+        }
+        labels[label_index].position = value;
+      } else { // is operand for mnemotic
+        int ind = find_operand_index(tmp.operand_group, token, count);
+        if (ind == -1) {
+          print_error_and_exit(INVALID_OPERAND, line_count);
+        } else if (ind == -2) { // the operand should be numeric value or label
+          if (operand_group_list[tmp.operand_group].operand_count == 0 &&
+              !operand_group_list[tmp.operand_group].label_operand) { // when is byte
+            int value = parse_number(token);
+            if (value == -1) {
+              print_error_and_exit(INVALID_OPERAND, line_count);
+            } else if (value > 255) {
+              print_error_and_exit(LABEL_ADDRESS_OUT_OF_RANGE, line_count);
+            }
+            byte = value;
+          }
+        } else { // predefined operand
+          byte |= operand_group_list[tmp.operand_group]
+                      .operands[ind]
+                      .destination_operand;
+        }
+      }
+      break;
+
+    case 2: {
+      int ind = find_operand_index(tmp.operand_group, token, count);
+      if (ind == -1) {
+        print_error_and_exit(INVALID_OPERAND, line_count);
+      } else if (ind == -2) { // the operand should be numeric
+        int value = parse_number(token);
+        if (value == -1){
+          print_error_and_exit(INVALID_OPERAND, line_count);
+        }
+        byte2 = value;
+        is_byte2 = true;
+      } else { // predefined operand
+        byte |= operand_group_list[tmp.operand_group].operands[ind].source_operand;
+      }
+    } break;
+    default:
+      break;
+    }
+    token = strtok(NULL, " ");
+    count += 1;
+  }
+  if(is_byte){
+   label_write(byte);
+  }
+  if(is_byte2){
+   label_write(byte2);
+  }
 }
 
 void validate_arguments_count(char *line, int line_count) {
     int operands = -1;
     char *mnemonic = NULL;
-  char *token = strtok(line, " ");
+  char buffer[255];
+  strcpy(buffer, line);
+  char *token = strtok(buffer, " ");
   mnemonic = token;
   while (token != NULL) {
     operands++;
@@ -97,9 +182,11 @@ void validate_arguments_count(char *line, int line_count) {
   }
   if (mnemonic[0] != '.' ){
     int index = find_instruction_index(mnemonic);
-    if (operands > operand_group_list[instruction_set[index].operand_group].required_operands){
+    int required = operand_group_list[instruction_set[index].operand_group].required_operands;
+    if (operands > required){
         print_error_and_exit(TO_MANY_ARGUMENTS, line_count);
-    } else  if (operands < operand_group_list[instruction_set[index].operand_group].required_operands){
+    } else  if (operands < required){
+        
         print_error_and_exit(UNSUFICIENT_ARGUMENTS, line_count);
     }
   }else{
@@ -180,16 +267,18 @@ void find_labels(const char *file_path, int instruction_count,
 }
 
 void print_label_array(label *labels, int size) {
-  for (int i = 0; i < size; i++) {
+    for (int i = 0; i < size; i++) {
     printf("Label: %s\n", labels[i].label);
     printf("Position: %d\n", labels[i].position);
-    printf("Code: ");
+    printf("Code: \n");
     for (int j = 0; j < labels[i].size; j++) {
-      printf("%d ", labels[i].code[j]);
+      printf("%d 0x%x 0b", labels[i].code[j], labels[i].code[j]);
+      decimal_to_binary_uint8(labels[i].code[j]);
+      printf("\n");
     }
-    printf("\nSize: %d\n", labels[i].size);
+    printf("Size: %d\n", labels[i].size);
     printf("\n");
-  }
+    }
 }
 
 void move_predefined_labels() {
@@ -214,12 +303,21 @@ void move_predefined_labels() {
 }
 
 int find_instruction_index(char *mnemonic) {
-for (int i = 0; i < instruction_count; i++) {
-if (strcmp(mnemonic, instruction_set[i].mnemonic) == 0) {
-return i;
+    for (int i = 0; i < instruction_count; i++) {
+      if (strcmp(mnemonic, instruction_set[i].mnemonic) == 0) {
+        return i;
+      }
+    }
+    return -1;
 }
-}
-return -1;
+
+int find_label_index(char *label) {
+    for (int i = 0; i < label_count; i++) {
+      if (strcmp(labels[i].label, label) == 0) {
+        return i;
+      }
+    }
+    return -1;
 }
 
 int parse_number(const char *str) {
@@ -238,4 +336,38 @@ int parse_number(const char *str) {
         return -1;
     }
     return (int) val;
+}
+
+int find_operand_index(uint8_t operand_group, char* operand, int count){
+  int operand_count = operand_group_list[operand_group].operand_count;
+  if(operand_count == 0 || (count == 2 && operand_group_list[operand_group].numeric_operand)){
+    return -2;
+  }    
+  for(int i = 0; i < operand_count; i++){
+    if(strcmp(operand, operand_group_list[operand_group].operands[i].label) == 0)
+    {
+      return i;
+    }
+  }
+  return -1;
+}
+
+void label_write(uint8_t value){
+  labels[label_index].code[labels[label_index].size] = value;
+  labels[label_index].size += 1;
+}
+
+void decimal_to_binary_uint8(uint8_t n) {
+    char binary_num[9] = {0};
+    int index = 0;
+    while (n > 0) {
+        binary_num[index++] = (n % 2 == 0 ? '0' : '1');
+        n = n / 2;
+    }
+    for (int i = 7; i >= 0; i--) {
+        if (binary_num[i]) 
+            printf("%c", binary_num[i]);
+        else
+            printf("0");
+    }
 }

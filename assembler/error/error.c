@@ -26,6 +26,9 @@ void print_error_and_exit(error_codes error_code, int line) {
   case LABELS_LIMIT_EXCEEDED:
     error_message = "The label limit was exceded";
     break;
+  case LABEL_ADDRESS_OUT_OF_RANGE:
+    error_message = "Label address is out of range";
+    break;
   case OUT_OF_MEMORY:
     error_message = "Out of memory";
     break;

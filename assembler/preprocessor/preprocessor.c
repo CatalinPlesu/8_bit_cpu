@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <ctype.h>
 
@@ -29,10 +30,17 @@ void clean_up_file(char* tmp_file){
     FILE* in = fopen(tmp_file, "r");
     FILE* out = fopen(temp_file, "w");
     int c, prev_c = ' ';
+    bool newline_written = true; // flag to keep track of whether newline was written
 
     while ((c = fgetc(in)) != EOF) {
-        if (!isspace(c) || (isspace(c) && !isspace(prev_c))) {
+        if (!isspace(c) || (isspace(c) && !isspace(prev_c) && c != '\n')) {
             fputc(c, out);
+            if(c == '\n') newline_written = true;
+            else newline_written = false;
+        }
+        else if(c == '\n' && !newline_written) {
+            fputc(c, out);
+            newline_written = true;
         }
         prev_c = c;
     }
@@ -42,7 +50,6 @@ void clean_up_file(char* tmp_file){
     remove(tmp_file);
     rename(temp_file, tmp_file);
 }
-
 void remove_comments_from_file(char* tmp_file){
 char temp_file[strlen(tmp_file) + 5];
     strcpy(temp_file, tmp_file);
