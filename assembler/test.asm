@@ -8,4 +8,6 @@ ADD A B
     ;comment test
 .data
 
-.label1
+.label2 123
+
+JMP label2 

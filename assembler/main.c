@@ -15,21 +15,18 @@
 #define WORKING_FILE_NAME "preprocessed.asm"
 
 operand_group operand_group_list[] = {
-    [MOV] = {3,
+    [MOV] = {3, 2,
              {{"A", 0x0 << 2, 0x0},
               {"B", 0x1 << 2, 0x1},
               {"PC", 0x3 << 2, 0x3}},
              false,
              false},
-    [ALU] = {2, {{"A", 0x0 << 3, 0x1}, {"B", 0x1 << 3, 0x0}}, false, false},
-    [LD] = {2, {{"A", 0x0, 0xff}, {"B", 0x1, 0xff}}, true, false},
-    [ST] = {2, {{"A", 0x0, 0xff}, {"B", 0x1, 0xff}}, false, false},
-    [JMP] = {0, {}, true, true},
-    [JE] = {0, {}, true, true},
-    [JA] = {0, {}, true, true},
-    [JB] = {0, {}, true, true},
-    [CMP] = {2, {{"A", 0x0, 0x0}, {"B", 0x1 << 1, 0x1}}, false, false},
-    [BYTE] = {0, {}, true, false}};
+    [ALU] = {2, 2, {{"A", 0x0 << 3, 0x1}, {"B", 0x1 << 3, 0x0}}, false, false},
+    [LD] = {2, 2, {{"A", 0x0, 0xff}, {"B", 0x1, 0xff}}, true, false},
+    [ST] = {2, 1, {{"A", 0x0, 0xff}, {"B", 0x1, 0xff}}, false, false},
+    [JMP] = {0, 1,{}, true, true},
+    [CMP] = {2, 1, {{"A", 0x0, 0x0}, {"B", 0x1 << 1, 0x1}}, false, false},
+    [BYTE] = {0, 1, {}, true, false}};
 
 instruction instruction_set[] = {
     {"NOP", 0b0000 << 4, -1},        {"MOV", 0b0001 << 4, MOV},
@@ -38,8 +35,8 @@ instruction instruction_set[] = {
     {"NOT", 0b1100 << 4, ALU},       {"AND", 0b1101 << 4, ALU},
     {"OR", 0b1110 << 4, ALU},        {"XOR", 0b1111 << 4, ALU},
     {"LD", 0b0010 << 4, LD},         {"ST", 0b0011 << 4, ST},
-    {"JMP", 0b0100 << 4 | 0x0, JMP}, {"JE", 0b0100 << 4 | 0x1, JE},
-    {"JA", 0b0100 << 4 | 0x2, JA},   {"JB", 0b0100 << 4 | 0x3, JB},
+    {"JMP", 0b0100 << 4 | 0x0, JMP}, {"JE", 0b0100 << 4 | 0x1, JMP},
+    {"JA", 0b0100 << 4 | 0x2, JMP},   {"JB", 0b0100 << 4 | 0x3, JMP},
     {"CMP", 0b0101 << 4, CMP},       {"BYTE", 0b0101 << 4, BYTE},
 };
 
@@ -47,6 +44,7 @@ label labels[MAX_LABELS] = {};
 predefined_label predefined_labels[] = {
     {"START", 0, false},
     {"DATA", 255, false},
+    {"GLOBAL", 123, false},
 };
 
 const int pred_label_count =
@@ -64,6 +62,7 @@ void parse_line(char *line, int line_count);
 void validate_arguments_count(char *line, int line_count);
 int find_instruction_index(char *mnemonic);
 void move_predefined_labels();
+int parse_number(const char *str);
 
 int main(int argc, char *argv[]) {
   print_help(argc, argv[0]);
@@ -96,7 +95,18 @@ void validate_arguments_count(char *line, int line_count) {
     operands++;
     token = strtok(NULL, " ");
   }
-  printf("%s, arguments: %d\n", mnemonic, operands);
+  if (mnemonic[0] != '.' ){
+    int index = find_instruction_index(mnemonic);
+    if (operands > operand_group_list[instruction_set[index].operand_group].required_operands){
+        print_error_and_exit(TO_MANY_ARGUMENTS, line_count);
+    } else  if (operands < operand_group_list[instruction_set[index].operand_group].required_operands){
+        print_error_and_exit(UNSUFICIENT_ARGUMENTS, line_count);
+    }
+  }else{
+    if (operands > 1){
+        print_error_and_exit(TO_MANY_ARGUMENTS, line_count);
+    }
+  }
 }
 
 void parse(char *file) {
@@ -157,7 +167,6 @@ void find_labels(const char *file_path, int instruction_count,
       if (!label_found) {
         label_count += 1;
         for (int i = 0; i < label_count; i++) {
-            printf("%s %s", token, labels[i].label);
           if (strcmp(token, labels[i].label) == 0) {
             print_error_and_exit(LABEL_REDEFINITION, line_count);
           }
@@ -165,10 +174,9 @@ void find_labels(const char *file_path, int instruction_count,
         strcpy(labels[label_count - 1].label, token);
       }
     }
-
+  }
     // Close the file
     fclose(fp);
-  }
 }
 
 void print_label_array(label *labels, int size) {
@@ -185,37 +193,24 @@ void print_label_array(label *labels, int size) {
 }
 
 void move_predefined_labels() {
-
-  for (int i = 0; i < pred_label_count; i++) {
-    for (int j = 0; j < label_count; j++) {
-      if (strcmp(predefined_labels[i].label, labels[j].label) == 0) {
-        predefined_labels[i].found = true;
-        labels[j].position = predefined_labels[i].position;
-        break;
+    int intern_pred_label_count = 0;
+    for (int i = 0; i < pred_label_count; i++){
+      if( predefined_labels[i].found ){
+        intern_pred_label_count += 1;
       }
     }
-  }
-  int predefined_index = 0;
-  int non_predefined_index = pred_label_count;
-  while (predefined_index < pred_label_count &&
-         non_predefined_index < label_count) {
-    while (predefined_index < pred_label_count &&
-           predefined_labels[predefined_index].found) {
-      predefined_index++;
+ 
+    // shift right existing labels to make space for predefined ones
+    for (int i = label_count-1; i >= 0; i--){
+      labels[i+intern_pred_label_count] = labels[i];
     }
-    while (non_predefined_index < label_count &&
-           labels[non_predefined_index].position != -1) {
-      non_predefined_index++;
+    for (int i = 0; i < pred_label_count; i++){
+       if( predefined_labels[i].found ){
+        strcpy(labels[i].label, predefined_labels[i].label);
+        labels[i].position = predefined_labels[i].position;
+      }
     }
-    if (predefined_index < pred_label_count &&
-        non_predefined_index < label_count) {
-      labels[predefined_index] = labels[non_predefined_index];
-      labels[non_predefined_index].position = -1;
-      predefined_labels[predefined_index].found = true;
-      predefined_index++;
-      non_predefined_index++;
-    }
-  }
+    label_count += intern_pred_label_count;
 }
 
 int find_instruction_index(char *mnemonic) {
@@ -225,4 +220,22 @@ return i;
 }
 }
 return -1;
+}
+
+int parse_number(const char *str) {
+    char *endptr;
+    long val;
+    if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+        val = strtol(str + 2, &endptr, 16);
+    } else if (str[0] == '0' && (str[1] == 'b' || str[1] == 'B')) {
+        val = strtol(str + 2, &endptr, 2);
+    } else if (str[0] == '0') {
+        val = strtol(str, &endptr, 8);
+    } else {
+        val = strtol(str, &endptr, 10);
+    }
+    if (*endptr != '\0') {
+        return -1;
+    }
+    return (int) val;
 }

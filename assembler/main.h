@@ -2,8 +2,9 @@
 #define structures_h_
 
 #include <stdint.h>
+#include <stdint.h>
 
-typedef enum { MOV, ALU, LD, ST, JMP, JE, JA, JB, CMP, BYTE} operands;
+typedef enum { MOV, ALU, LD, ST, JMP, CMP, BYTE} operands;
 
 typedef struct operand {
     char *label;
@@ -13,6 +14,7 @@ typedef struct operand {
 
 typedef struct {
     uint8_t operand_count;
+    uint8_t required_operands;
     operand operands[3];
     bool numeric_operand;
     bool label_operand;
