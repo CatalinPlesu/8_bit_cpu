@@ -64,6 +64,11 @@ int find_label_index(char *label);
 int find_operand_index(uint8_t operand_group, char* operand, int count);
 void label_write(uint8_t value);
 void decimal_to_binary_uint8(uint8_t n);
+void add_reference(int label_index);
+void bubble_sort_lables();
+void adjust_label_position();
+void link();
+void write_hex_file(char* file_name);
 
 int main(int argc, char *argv[]) {
   print_help(argc, argv[0]);
@@ -73,13 +78,19 @@ int main(int argc, char *argv[]) {
   move_predefined_labels();
   parse(WORKING_FILE_NAME);
 
-  print_label_array(labels, label_count);
+  bubble_sort_lables();
+  adjust_label_position();
+  link();
 
+  //print_label_array(labels, label_count);
+
+  write_hex_file(argv[1]);
   return 0;
 }
 
 void parse_line(char *line, int line_count) {
   validate_arguments_count(line, line_count);
+
   char buffer[255];
   strcpy(buffer, line);
   char *token = strtok(buffer, " ");
@@ -131,6 +142,12 @@ void parse_line(char *line, int line_count) {
               print_error_and_exit(LABEL_ADDRESS_OUT_OF_RANGE, line_count);
             }
             byte = value;
+          } else{ // label operand
+            byte2 = 0x0;
+            is_byte2 = true;
+            int ind = find_label_index(token);
+            add_reference(ind);
+
           }
         } else { // predefined operand
           byte |= operand_group_list[tmp.operand_group]
@@ -182,7 +199,11 @@ void validate_arguments_count(char *line, int line_count) {
   }
   if (mnemonic[0] != '.' ){
     int index = find_instruction_index(mnemonic);
-    int required = operand_group_list[instruction_set[index].operand_group].required_operands;
+    int operand_group = instruction_set[index].operand_group;
+    if(operand_group == -1){
+      return;
+    }
+    int required = operand_group_list[operand_group].required_operands;
     if (operands > required){
         print_error_and_exit(TO_MANY_ARGUMENTS, line_count);
     } else  if (operands < required){
@@ -268,18 +289,25 @@ void find_labels(const char *file_path, int instruction_count,
 
 void print_label_array(label *labels, int size) {
     for (int i = 0; i < size; i++) {
-    printf("Label: %s\n", labels[i].label);
-    printf("Position: %d\n", labels[i].position);
-    printf("Code: \n");
-    for (int j = 0; j < labels[i].size; j++) {
-      printf("%d 0x%x 0b", labels[i].code[j], labels[i].code[j]);
-      decimal_to_binary_uint8(labels[i].code[j]);
-      printf("\n");
-    }
-    printf("Size: %d\n", labels[i].size);
-    printf("\n");
+        printf("Label: %s\n", labels[i].label);
+        printf("Position: %d\n", labels[i].position);
+        printf("Size: %d\n", labels[i].size);
+        printf("Code: \n");
+        for (int j = 0; j < labels[i].size; j++) {
+            printf("%d 0x%x 0b", labels[i].code[j], labels[i].code[j]);
+            decimal_to_binary_uint8(labels[i].code[j]);
+            printf("\n");
+        }
+        printf("References count: %d\n", labels[i].ref_count);
+        printf("References: \n");
+        for (int j = 0; j < labels[i].ref_count; j++) {
+            printf("Label index: %s\n", labels[i].reference[j].label);
+            printf("Code index: %d\n", labels[i].reference[j].code_ind);
+        }
+        printf("\n");
     }
 }
+
 
 void move_predefined_labels() {
     int intern_pred_label_count = 0;
@@ -370,4 +398,86 @@ void decimal_to_binary_uint8(uint8_t n) {
         else
             printf("0");
     }
+}
+
+void add_reference(int local_label_index){
+
+  strcpy(
+    labels[local_label_index].reference[labels[local_label_index].ref_count].label,
+    labels[label_index].label
+  );
+  labels[local_label_index].reference[labels[local_label_index].ref_count].code_ind = labels[label_index].size+1;
+  labels[local_label_index].ref_count += 1;
+}
+
+void bubble_sort_lables(){
+  label tmp = {};
+  for (int i = 0; i < label_count - 1; i++){
+    for (int j = 0; j < label_count - i - 1; j++){
+      if(labels[j].position >= labels[j+1].position && j != 0){
+        tmp = labels[j];
+        strcpy(tmp.label, labels[j].label);
+        labels[j] = labels[j+1];
+        strcpy(labels[j].label, labels[j+1].label);
+        labels[j+1] = tmp;
+        strcpy(labels[j+1].label, tmp.label);
+      }
+    }
+  }
+}
+
+void adjust_label_position(){
+  uint8_t adress = labels[0].size;
+  for(int i = 1; i < label_count; i++){
+    if(labels[i].position != adress){
+      labels[i].position = adress;
+    }
+    adress += labels[i].size;
+  }
+}
+
+void link(){
+  for(int i = 0; i < label_count; i++){
+    for(int r = 0; r < labels[i].ref_count; r++){
+      ref rr = labels[i].reference[r];
+      labels[find_label_index(rr.label)].code[rr.code_ind] = labels[i].position;
+    }
+  }
+}
+
+void write_hex_file(char* file_name) {
+    // Create file with the given argument and append 'hex' to the end
+    char hex_file_name[strlen(file_name) + 4];
+    strcpy(hex_file_name, file_name);
+    strcat(hex_file_name, ".hex");
+    FILE* hex_file = fopen(hex_file_name, "w");
+
+    // Write the first line of the file
+    fprintf(hex_file, "v3.0 hex words plain\n");
+
+    int printed = 0;
+
+    // Write the hex values for each label
+    for (int i = 0; i < label_count; i++) {
+        // Print hex values for code
+        for (int j = 0; j < labels[i].size; j++) {
+            fprintf(hex_file, "%02X ", labels[i].code[j]);
+            printed += 1;
+            if(printed % 16 == 0){
+             fprintf(hex_file, "\n");
+            }
+        }
+    }
+
+    // Fill remaining spots with 00
+    while (printed != 256) {
+        fprintf(hex_file, "00 ");
+         printed += 1;
+            if(printed % 16 == 0){
+             fprintf(hex_file, "\n");
+         }
+    }
+
+    // Close file
+    fclose(hex_file);
 }

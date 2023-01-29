@@ -23,14 +23,21 @@ typedef struct {
 typedef struct instruction {
     char *mnemonic;
     uint8_t opcode;
-    uint8_t operand_group;
+    int8_t operand_group;
 }instruction;
+
+typedef struct ref{
+    char label[16];
+    uint8_t code_ind;
+}ref;
 
 typedef struct{
     char label[16];
     uint8_t position;
     uint8_t size;
     uint8_t code[256];
+    ref reference[256];
+    uint8_t ref_count;
 }label;
 
 typedef struct{
